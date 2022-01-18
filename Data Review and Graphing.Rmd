@@ -1,21 +1,21 @@
-# ---
 
-# Ben Smith 
-# January 2021 
-# REACH BGD Mission
+# Using historical rainfall and incident data as a predictive damage estimation tool
 
-# ---
+Ben Smith 
+January 2021 
+REACH BGD Mission
 
-# The aim of this script is to generate an output displaying the recorded 
-# daily rainfall for CXB against the incident data for the camps. This 
-# should then be able to inform actors as to the likely result, and 
-# therefore response, required for incoming rainfall. Once completed,
-# this should be presented to the IMAWG and the EPRWG for feedback and 
-# dissemination.
+The aim of this script is to generate an output displaying the recorded
+daily rainfall for CXB against the incident data for the camps. This
+should then be able to inform actors as to the likely result, and
+therefore response, required for incoming rainfall. Once completed,
+this should be presented to the IMAWG and the EPRWG for feedback and
+dissemination.
 
 
-# Preamble ----------------------------------------------------------------
-
+### Preamble
+Load in all of the data and packages:
+```{r}
 # install.packages("readxl")
 library(readxl)
 # install.packages("xlsx")
@@ -26,8 +26,11 @@ library(tidyr) # For rearranging the incident dataset
 # install.packages("dplyr")
 library(dplyr) # For rearranging the incident dataset
 
-# install.packages("plotly")
+# install.packages("plotly") # For interactive graphs
 library(plotly)
+
+# install.packages("knitr") # For outputting plotly in Rmd
+# library(knitr) # this sets of a load of slow crashes...
 
 # install.packages("zoo")
 library(zoo)
@@ -45,34 +48,41 @@ df_cxb_2020 <- read_xlsx("../../06 - Output and Published Datasets/REACH_BGD_Nat
 
 df_cxb_2021 = read.csv("../../02 - Reformatted Data/BMD Weather Data - 2021 - Cox Bazar.csv")
 
-# Reformat the rainfall rainfall data:
-  
-  # Convert 2019 to daily
-  df_cxb_2019 <- df_cxb_2019 %>% 
-    mutate(Date = as.Date(Date_time, format = "%Y-%m-%d")) %>%
-    select(Date, "Interval_GSB Coxs Bazaar-1227") %>%
-    group_by(Date) %>%
-    summarise(Daily_Rainfall = sum(`Interval_GSB Coxs Bazaar-1227`, na.rm = T)) %>%
-    filter(format(Date, "%Y") != "2020") %>%
-    mutate(Date = as.POSIXct(Date))
+```
 
-  # Convert 2020 date to POSIXct, rainfall to numeric and remove mysterious duplicate:
-  df_cxb_2020$Date = as.POSIXct(df_cxb_2020$Date)
-  df_cxb_2020$Daily_Rainfall <- as.numeric(df_cxb_2020$`rain.GSB Cox's Bazaar-1227`)
-  df_cxb_2020 = df_cxb_2020[-which(duplicated(df_cxb_2020$Date)),]
+### Reformat the rainfall rainfall data:
+Now reformat all of the data to smarten inconsistencies and to merge into a single rainfall dataset (df_rainfall).
+```{r}  
+# Convert 2019 to daily
+df_cxb_2019 <- df_cxb_2019 %>% 
+  mutate(Date = as.Date(Date_time, format = "%Y-%m-%d")) %>%
+  select(Date, "Interval_GSB Coxs Bazaar-1227") %>%
+  group_by(Date) %>%
+  summarise(Daily_Rainfall = sum(`Interval_GSB Coxs Bazaar-1227`, na.rm = T)) %>%
+  filter(format(Date, "%Y") != "2020") %>%
+  mutate(Date = as.POSIXct(Date))
 
-  # Convert 2021 to POSIXct and numeric:
-  df_cxb_2021$Date = as.POSIXct(as.Date(df_cxb_2021$`ï..Date`,  "%d/%m/%Y"))
-  df_cxb_2021$Daily_Rainfall = as.numeric(gsub(pattern = "Tr", 
-                                               replacement = "0.5", 
-                                               x = df_cxb_2021$`Rainfall..mm.`))
+# Convert 2020 date to POSIXct, rainfall to numeric and remove mysterious duplicate:
+df_cxb_2020$Date = as.POSIXct(df_cxb_2020$Date)
+df_cxb_2020$Daily_Rainfall <- as.numeric(df_cxb_2020$`rain.GSB Cox's Bazaar-1227`)
+df_cxb_2020 = df_cxb_2020[-which(duplicated(df_cxb_2020$Date)),]
 
+# Convert 2021 to POSIXct and numeric:
+df_cxb_2021$Date = as.POSIXct(as.Date(df_cxb_2021$`ï..Date`,  "%d/%m/%Y"))
+df_cxb_2021$Daily_Rainfall = as.numeric(gsub(pattern = "Tr", 
+                                             replacement = "0.5", 
+                                             x = df_cxb_2021$`Rainfall..mm.`))
+
+# Join all of the rainfall into a single dataframe
 df_rainfall <- rbind(df_cxb_2019, 
                      df_cxb_2020 %>% select(Date, Daily_Rainfall),
                      df_cxb_2021 %>% select(Date, Daily_Rainfall))
 
+```
 
-# Check the Input Data ----------------------------------------------------
+### Check the Input Data
+Vie the data if you wish to help understand the incident data then crop this down so that only the incidents relating to flooding are included in a df_flood dataframe.
+```{r}
 View(head(df_incident))
 
 df_flood <- df_incident %>% 
@@ -81,11 +91,13 @@ df_flood <- df_incident %>%
          Incident_Details, Affected_HHs, Affected_individuals, 'Casualties_(ind)',
          Injured_ind, Displaced_HH, Displaced_ind,
          Partially_Damaged_shelters, Totally_Damaged_shelters, Damaged_Shelter_2018,
-         Damaged_waterpoints, Damaged_health_facilities, Damaged_food_distribution_site)
+         Damaged_waterpoints, Damaged_health_facilities,
+         Damaged_food_distribution_site)
+```
 
-
-# Reformat the Incident Data to Daily -------------------------------------
-
+### Reformat the Incident Data to Daily
+The incident data is currently noted on an incident by incident basis. For the first line of investigation we will group this by day so that we can see the combined affect of the rainfall accross all of the camps.
+```{r}
 df_flood_daily = df_flood %>% 
   select(-Incident_Details) %>%
   group_by(Date_of_incident) %>%
@@ -102,10 +114,11 @@ temp_text <- df_flood %>%
 df_flood_daily <- df_flood_daily %>% left_join(temp_text, by = "Date_of_incident") 
 
 rm(temp_text)
+```
 
-
-# Join all of the data into a single dataframe ----------------------------
-
+### Join all of the data into a single dataframe
+For ease, lets create a single master dataset with all of the rainfall and daily flood incident data.
+```{r}
 dates = data.frame(Date = seq.POSIXt(min(df_rainfall$Date[1],
                                          df_flood_daily$Date_of_incident[1]),
                                      max(tail(df_rainfall$Date, 1),
@@ -114,11 +127,12 @@ dates = data.frame(Date = seq.POSIXt(min(df_rainfall$Date[1],
 
 df_master = dates %>% full_join(df_rainfall)
 df_master = df_master %>% full_join(df_flood_daily, by = c("Date" = "Date_of_incident"))
+```
 
-
-# Create rainfall rolling averages ----------------------------------------
-# It is likely that many of the events will be due to multiple days of rainfall
-# Therefore, create some rolling averages to check this.
+### Create rainfall rolling averages
+It is likely that many of the events will be due to multiple days of rainfall
+Therefore, create some rolling averages to check this.
+```{r}
 moving_sum = function(x, n){y = rollsum(x, k = n, align = "right", fill = NA, na.rm = T)}
 
 df_master <- df_master %>% 
@@ -131,17 +145,22 @@ df_master <- df_master %>%
 
 # "day3" = rollsum(df_master$Daily_Rainfall, k = 3, align = "right", fill = NA) 
 # ^^^ This discounts values with NAs in their window.
+```
 
+### Initial Graphing
+Let's set up some plots to get an idea of how the incident and rainfall data compare.
 
-# Create Graphs -----------------------------------------------------------
-
+First, let's ;look at the incidents (number of individuals affected) over time:
+```{r}
 # Plot the affected individuals from events:
 plot_ly(x = df_master$Date, 
         y = df_master$Affected_individuals,
         type = 'scatter', mode = 'lines+markers',
         hovertext = df_master$Incident_Details)
+```
 
-# View where the incidents occurred:
+Let's then plot when the incidents occurred alongside the rainfall. Incidents are shown in blue below the xaxis.
+```{r}
 vlines = data.frame(
   x = c(t(data.frame(a = df_master$Date[which(df_master$Affected_individuals>0)], 
                      b = df_master$Date[which(df_master$Affected_individuals>0)],
@@ -156,8 +175,10 @@ plot_ly(x = vlines$x, y = vlines$y,
   add_trace(x = df_master$Date, y = df_master$Daily_Rainfall,
             mode = "lines", type = "scatter",
             name = "Rainfall")
+```
 
-
+We can also see below how the different consequences compare:
+```{r}
 # Plot a range of consequences from daily rainfall: 
 plot_ly(x = df_master$Daily_Rainfall, y = df_master$Number_of_incidents,
         type = "scatter", mode = "markers", name = "Number_of_incidents") %>%
@@ -187,34 +208,35 @@ plot_ly(x = df_master$Affected_individuals, y = df_master$Daily_Rainfall,
             type = "scatter", mode = "markers", name = "5") %>%
   layout(yaxis = list(title = "Daily Rainfall (mm)"),
          xaxis = list(title = "Recorded Consequence"))
+```
 
-# Create Output -----------------------------------------------------------
+### Create Output
 
 
-# Caveats and Notes -------------------------------------------------------
+### Caveats and Notes
 
-  # --- Number of recordings:
-  # There are a large number of incident records that do not have rainfall data:
-  length(
-    which(
-      is.na(
-        df_master$Daily_Rainfall[which(df_master$Affected_individuals>0)]
-        )
+```{r}
+# --- Number of recordings:
+# There are a large number of incident records that do not have rainfall data:
+length(
+  which(
+    is.na(
+      df_master$Daily_Rainfall[which(df_master$Affected_individuals>0)]
       )
     )
-  # >>> 45 missing values out of 86, largely in 2018.
-  #     Though 2020 has a lot of missing data too.
+  )
+# >>> 45 missing values out of 86, largely in 2018.
+    # Though 2020 has a lot of missing data too.
+```
 
-
-# Unused Code -------------------------------------------------------------
-
-  # add_trace(x = df_master$Date_of_incident,
-  #           y = df_master$Affected_individuals,
-  #           type = 'scatter', mode = 'markers',
-  #           name = "Incidents", yaxis = "y2",
-  #           hovertext = df_master$Incident_Details) %>%
-  # layout(yaxis2 = list(side = "right",  overlaying = "y", sharey = T))
-  
-
+### Unused Code
+```{r}
+  add_trace(x = df_master$Date_of_incident,
+            y = df_master$Affected_individuals,
+            type = 'scatter', mode = 'markers',
+            name = "Incidents", yaxis = "y2",
+            hovertext = df_master$Incident_Details) %>%
+  layout(yaxis2 = list(side = "right",  overlaying = "y", sharey = T))
+```
 
 
